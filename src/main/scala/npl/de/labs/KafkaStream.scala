@@ -1,8 +1,7 @@
 package npl.de.labs
 
-import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
-import com.paulgoldbaum.influxdbclient.{InfluxDB, Point}
 import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.io.{DatumReader, Decoder, DecoderFactory}
@@ -14,12 +13,13 @@ import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
 import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.{Seconds, StreamingContext}
+import org.influxdb.InfluxDBFactory
+import org.influxdb.dto.Point
 import org.json4s._
 import org.json4s.native.JsonMethods._
 
-import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor}
 import scala.io.Source
+
 
 object KafkaStream extends App with Logging {
 
@@ -48,9 +48,10 @@ object KafkaStream extends App with Logging {
     Subscribe[String, Array[Byte]](topics, kafkaParams)
   )
 
-  implicit val ec: ExecutionContextExecutor = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4))
-
-  val influxDb = InfluxDB.connect(host = "35.187.190.106", port = 8086, username = "test", password = "test").selectDatabase("grafana")
+  val influxDB = InfluxDBFactory.connect("http://35.187.190.106:8086", "test", "test")
+    .setDatabase("grafana")
+    .setRetentionPolicy("default")
+    //.enableBatch(BatchOptions.DEFAULTS.actions(5).flushDuration(10).consistency())
 
   def decodeAvro(message: Array[Byte]) = {
     // Deserialize and create generic record
@@ -58,10 +59,15 @@ object KafkaStream extends App with Logging {
     avroReader.read(null, decoder).toString
   }
 
-  def sendToInflux(counter: (String, Int)) = {
-    Await.result(influxDb.write(Point("words").addField("token", counter._1).addField("cnt", counter._2)),100.milliseconds)
+  def sendToInflux(counter: (String, Int)): Unit = {
+    val p=Point.measurement("words")
+      .time(System.currentTimeMillis(), TimeUnit.MILLISECONDS)
+      .addField("token", counter._1)
+      .addField("cnt", counter._2)
+      .build()
+    log.info(s">>> point : {${p.lineProtocol()}}  , $counter")
+    influxDB.write(p)
   }
-
 
 
   stream.map(record => {
@@ -86,6 +92,6 @@ object KafkaStream extends App with Logging {
     print()
 
   ssc.start()
-  ssc.awaitTerminationOrTimeout(timeout = args(0).toInt*1000)
+  ssc.awaitTerminationOrTimeout(timeout = args(0).toInt * 1000)
 
 }
