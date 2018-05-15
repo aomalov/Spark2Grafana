@@ -70,18 +70,18 @@ object KafkaStream extends App with Logging {
   }
 
 
-  stream.map(record => {
+  val k=stream.map(record => {
     parse(decodeAvro(record.value())) \ "location"
   }).
     map {
       case JString(loc) => Some(new java.net.URI(loc).getPath)
       case x => None
     }.
-    map {
+    flatMap {
       case Some(word) =>
         print(">>> got WORD:  ", word)
-        (word, 1)
-      case None => ("", 0)
+        word.split("\\W+").map(token=>(token,1)).toList
+      case None => List(("", 0))
     }.
     reduceByKey(_ + _).
     filter {
