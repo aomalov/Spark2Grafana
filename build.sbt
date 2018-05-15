@@ -11,7 +11,6 @@ libraryDependencies ++= Seq(
   "org.apache.avro" % "avro" % "1.8.2",
   "org.json4s" %% "json4s-native" % "3.5.3",
   "com.paulgoldbaum" %% "scala-influxdb-client" % "0.6.0",
-//  "com.pygmalios" %% "reactiveinflux" % "0.10.0.5",
   "org.influxdb" % "influxdb-java" % "2.10"
 )
 

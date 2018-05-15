@@ -19,6 +19,7 @@ import org.json4s._
 import org.json4s.native.JsonMethods._
 
 import scala.io.Source
+import scala.util.{Success, Try}
 
 
 object KafkaStream extends App with Logging {
@@ -29,7 +30,7 @@ object KafkaStream extends App with Logging {
   val avroReader: DatumReader[GenericRecord] = new SpecificDatumReader[GenericRecord](schema)
 
   val kafkaParams = Map[String, Object](
-    "bootstrap.servers" -> "instance-1.c.spheric-vine-200212.internal:6667",
+    "bootstrap.servers" -> "35.187.190.106:6667",
     "key.deserializer" -> classOf[StringDeserializer],
     "value.deserializer" -> classOf[ByteArrayDeserializer],
     "group.id" -> "spark-reader",
@@ -51,36 +52,43 @@ object KafkaStream extends App with Logging {
   val influxDB = InfluxDBFactory.connect("http://35.187.190.106:8086", "test", "test")
     .setDatabase("grafana")
     .setRetentionPolicy("default")
-    //.enableBatch(BatchOptions.DEFAULTS.actions(5).flushDuration(10).consistency())
 
   def decodeAvro(message: Array[Byte]) = {
     // Deserialize and create generic record
-    val decoder: Decoder = DecoderFactory.get().binaryDecoder(message, null)
-    avroReader.read(null, decoder).toString
+    if (!message.isEmpty) {
+      val decoder: Decoder = DecoderFactory.get().binaryDecoder(message, null)
+      avroReader.read(null, decoder).toString
+    }
+    else "error"
   }
 
-  def sendToInflux(counter: (String, Int)): Unit = {
-    val p=Point.measurement("words")
-      .time(System.currentTimeMillis(), TimeUnit.MILLISECONDS)
-      .addField("token", counter._1)
-      .addField("cnt", counter._2)
-      .build()
-    log.info(s">>> point : {${p.lineProtocol()}}  , $counter")
-    influxDB.write(p)
+  def sendToInflux(counter: (String, Int)): Unit = counter match {
+    case (token, cnt) if token!="" && cnt>0 =>
+      val p = Point.measurement("words")
+        .time(System.currentTimeMillis(), TimeUnit.MILLISECONDS)
+        .addField("token", counter._1)
+        .addField("cnt", counter._2)
+        .tag("token-tag", counter._1)
+        .build()
+      log.info(s">>> point : {${p.lineProtocol()}}  , $counter")
+      influxDB.write(p)
+    case _ => ()
   }
 
 
-  val k=stream.map(record => {
-    parse(decodeAvro(record.value())) \ "location"
+  stream.map(record => {
+    Try {
+      parse(decodeAvro(record.value())) \ "location"
+    }
   }).
     map {
-      case JString(loc) => Some(new java.net.URI(loc).getPath)
+      case Success(JString(loc)) => Some(new java.net.URI(loc).getPath)
       case x => None
     }.
     flatMap {
       case Some(word) =>
         print(">>> got WORD:  ", word)
-        word.split("\\W+").map(token=>(token,1)).toList
+        word.split("\\W+").map(token => (token, 1)).toList
       case None => List(("", 0))
     }.
     reduceByKey(_ + _).
