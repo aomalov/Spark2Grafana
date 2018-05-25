@@ -59,7 +59,8 @@ object KafkaStream extends App with Logging {
       val decoder: Decoder = DecoderFactory.get().binaryDecoder(message, null)
       avroReader.read(null, decoder).toString
     }
-    else "error"
+    else
+      throw new Exception("empty message")
   }
 
   def sendToInflux(counter: (String, Int)): Unit = counter match {
@@ -91,10 +92,10 @@ object KafkaStream extends App with Logging {
         word.split("\\W+").map(token => (token, 1)).toList
       case None => List(("", 0))
     }.
-    reduceByKey(_ + _).
     filter {
       case (_, cnt) => cnt > 0
     }.
+    reduceByKey(_ + _).
     map(sendToInflux).
     map(print(">>> reduced results:  ", _)).
     print()
